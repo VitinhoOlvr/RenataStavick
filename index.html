@@ -1,7 +1,7 @@
 
-Site-Renata-Stavick-Acesso-Salvo-16-11-2026.html
+Site-Renata-Stavick-Login-HTML-16-11-2026.html
 100%
-RenataStavick2rafas<!DOCTYPE html>
+<!DOCTYPE html>
 
 <html lang="pt-BR">
 <head>
@@ -142,17 +142,7 @@ document.addEventListener('keydown',function(event){if(event.key==='Escape')clos
   video{background:#f7f0eb}
   @media(max-width:640px){video{max-height:70vh}}
 </style>
-<!-- Supabase Auth: chave publishable/anon é própria para uso no navegador -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.0"></script>
-<script>
-  window.RENATA_SUPABASE_URL = 'https://cbqcpslzqqsemynetofg.supabase.co';
-  window.RENATA_SUPABASE_KEY = 'sb_publishable_WN9OffyUfoKdei3W1c6Umg_W_eS9br1';
-  window.renataSupabase = window.supabase.createClient(
-    window.RENATA_SUPABASE_URL,
-    window.RENATA_SUPABASE_KEY,
-    { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: window.localStorage, storageKey: 'renata-stavick-admin-session' } }
-  );
-</script>
+<!-- Login local do painel: não depende de conta ou senha do Supabase. -->
 </head>
 <body class="bg-nude-50 text-nude-800 font-sans antialiased min-h-screen flex flex-col selection:bg-rose-200 selection:text-nude-900">
 <!-- BOTÃO FLUTUANTE WHATSAPP -->
@@ -557,12 +547,10 @@ Selecione uma categoria e depois o procedimento desejado.
 </div>
 <h3 class="font-serif text-2xl text-nude-900">Painel Profissional</h3>
 <p class="text-xs text-nude-800">Acesso exclusivo para Renata Stavick administrar a agenda e serviços.</p>
-<p class="text-xs text-nude-700">Entre com o e-mail e a senha cadastrados no Supabase para acessar sua agenda com segurança.</p>
+<p class="text-xs text-nude-700">Digite a senha de acesso para abrir sua agenda.</p>
 <div class="space-y-3 text-left">
-<label class="block text-xs font-bold uppercase text-nude-800">E-mail</label>
-<input class="w-full bg-nude-50 border border-nude-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400" id="adminEmailInput" autocomplete="username" inputmode="email" value="recuperacaovho@gmail.com" onkeydown="if(event.key==='Enter')loginAdmin()" placeholder="Digite seu e-mail" type="email"/>
 <label class="block text-xs font-bold uppercase text-nude-800">Senha de Acesso</label>
-<input class="w-full bg-nude-50 border border-nude-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400" id="adminPinInput" autocomplete="current-password" onkeydown="if(event.key==='Enter')loginAdmin()" placeholder="Digite sua senha" type="password"/>
+<input class="w-full bg-nude-50 border border-nude-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-rose-400" id="adminPinInput" autocomplete="current-password" onkeydown="if(event.key==='Enter')loginAdmin()" placeholder="Digite a senha de acesso" type="password"/>
 <p id="adminLoginError" class="hidden text-xs text-red-600" role="alert"></p>
 <button id="adminLoginButton" class="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold py-3 rounded-xl text-sm transition-all shadow-md" onclick="loginAdmin()">
           Entrar no Painel
@@ -1141,45 +1129,31 @@ function lookupBooking() {
   `;
 }
 
-// Autenticação do painel profissional pelo Supabase Auth
+// Acesso local simplificado. A sessão fica salva neste navegador.
 async function loginAdmin() {
-  const emailField = document.getElementById('adminEmailInput');
   const passwordField = document.getElementById('adminPinInput');
   const errorBox = document.getElementById('adminLoginError');
   const button = document.getElementById('adminLoginButton');
-  const email = (emailField?.value || '').trim().toLowerCase();
-  const password = passwordField?.value || '';
-  const allowedEmail = 'recuperacaovho@gmail.com';
-  if (!errorBox || !button || !passwordField) { showToast('Não foi possível carregar o formulário do painel. Atualize a página.'); return; }
+  if (!errorBox || !button || !passwordField) return;
   errorBox.classList.add('hidden');
   errorBox.textContent = '';
-  if (email !== allowedEmail) {
-    errorBox.textContent = 'Este e-mail não tem permissão para acessar o painel.';
-    errorBox.classList.remove('hidden');
-    return;
-  }
-  if (!password) {
-    errorBox.textContent = 'Digite sua senha.';
+  if (passwordField.value !== 'RenataStavick2rafas') {
+    errorBox.textContent = 'Senha incorreta. Tente novamente.';
     errorBox.classList.remove('hidden');
     return;
   }
   button.disabled = true;
-  button.textContent = 'Verificando...';
+  button.textContent = 'Abrindo painel...';
   try {
-    const { data, error } = await window.renataSupabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    if (!data.user || (data.user.email || '').toLowerCase() !== allowedEmail) {
-      await window.renataSupabase.auth.signOut();
-      throw new Error('Conta sem autorização para este painel.');
-    }
+    localStorage.setItem('renata-stavick-admin-local-session', 'true');
     isAdminLoggedIn = true;
-    document.getElementById('adminLoginCard').classList.add('hidden');
-    document.getElementById('adminPanelContent').classList.remove('hidden');
+    document.getElementById('adminLoginCard')?.classList.add('hidden');
+    document.getElementById('adminPanelContent')?.classList.remove('hidden');
     passwordField.value = '';
     renderAdmin();
     showToast('Acesso autorizado. Bem-vinda, Renata!');
   } catch (err) {
-    errorBox.textContent = 'Não foi possível entrar. Confira o e-mail e a senha ou verifique se a conta foi criada no Supabase Auth.';
+    errorBox.textContent = 'Não foi possível salvar o acesso neste navegador.';
     errorBox.classList.remove('hidden');
   } finally {
     button.disabled = false;
@@ -1187,12 +1161,13 @@ async function loginAdmin() {
   }
 }
 
-async function logoutAdmin() {
-  try { await window.renataSupabase.auth.signOut(); } catch (err) { console.error('Falha ao encerrar sessão:', err); }
+function logoutAdmin() {
+  localStorage.removeItem('renata-stavick-admin-local-session');
   isAdminLoggedIn = false;
-  document.getElementById('adminPinInput').value = '';
-  document.getElementById('adminLoginCard').classList.remove('hidden');
-  document.getElementById('adminPanelContent').classList.add('hidden');
+  const passwordField = document.getElementById('adminPinInput');
+  if (passwordField) passwordField.value = '';
+  document.getElementById('adminLoginCard')?.classList.remove('hidden');
+  document.getElementById('adminPanelContent')?.classList.add('hidden');
 }
 
 function renderAdmin() {
@@ -1466,45 +1441,15 @@ function handleHashNavigation() {
 
 window.addEventListener('hashchange', handleHashNavigation);
 
-// Restaura automaticamente o acesso salvo neste navegador e acompanha a sessão.
-// O Supabase mantém a sessão no armazenamento local e renova o token automaticamente.
-window.addEventListener('DOMContentLoaded', async () => {
-  const allowedEmail = 'recuperacaovho@gmail.com';
-  const applyAdminSession = (session) => {
-    const email = (session?.user?.email || '').toLowerCase();
-    const authorized = Boolean(session && email === allowedEmail);
-    isAdminLoggedIn = authorized;
-    document.getElementById('adminLoginCard')?.classList.toggle('hidden', authorized);
-    document.getElementById('adminPanelContent')?.classList.toggle('hidden', !authorized);
-    if (authorized) renderAdmin();
-  };
-
-  try {
-    // Registra o observador primeiro para não perder alterações de autenticação.
-    window.renataSupabase.auth.onAuthStateChange((event, nextSession) => {
-      if (event === 'SIGNED_OUT' || !nextSession) {
-        applyAdminSession(null);
-        return;
-      }
-      if (['INITIAL_SESSION', 'SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
-        applyAdminSession(nextSession);
-      }
-    });
-
-    const { data: { session }, error } = await window.renataSupabase.auth.getSession();
-    if (error) throw error;
-    const email = (session?.user?.email || '').toLowerCase();
-    if (session && email !== allowedEmail) {
-      await window.renataSupabase.auth.signOut();
-      applyAdminSession(null);
-    } else {
-      applyAdminSession(session);
-    }
-  } catch (err) {
-    console.error('Não foi possível restaurar a sessão do painel:', err);
-    applyAdminSession(null);
-  }
+// Restaura o acesso local neste navegador após a primeira autenticação.
+window.addEventListener('DOMContentLoaded', () => {
+  const authorized = localStorage.getItem('renata-stavick-admin-local-session') === 'true';
+  isAdminLoggedIn = authorized;
+  document.getElementById('adminLoginCard')?.classList.toggle('hidden', authorized);
+  document.getElementById('adminPanelContent')?.classList.toggle('hidden', !authorized);
+  if (authorized) renderAdmin();
 });
 </script>
 </body>
 </html>
+Exibindo Site-Renata-Stavick-Login-HTML-16-11-2026.html…
