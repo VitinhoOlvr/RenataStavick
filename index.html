@@ -59,7 +59,7 @@
   }
   
   .butterfly-float {
-    animation: float 18s ease-in-out infinite;
+    animation: float 8s ease-in-out infinite;
   }
   
   @keyframes float {
@@ -73,7 +73,7 @@
 </style>
 <style id="renata-interface-polish">
   .section-kicker{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;font-weight:700;color:#b76e79}
-  .tiny-butterfly{display:inline-block;animation:butterflyDrift 18s ease-in-out infinite}
+  .tiny-butterfly{display:inline-block;animation:butterflyDrift 5s ease-in-out infinite}
   .gallery-heading{display:flex;align-items:center;gap:.85rem}
   .gallery-icon{width:2.65rem;height:2.65rem;border-radius:50%;display:grid;place-items:center;background:#fdf1f1;color:#b76e79;border:1px solid #eadcda}
   .portfolio-card{overflow:hidden;border:1px solid #eadcda;border-radius:1.15rem;background:#fff;box-shadow:0 5px 18px rgba(70,54,56,.05);transition:transform .35s ease,box-shadow .35s ease}
@@ -140,7 +140,8 @@ document.addEventListener('keydown',function(event){if(event.key==='Escape')clos
   video{background:#f7f0eb}
   @media(max-width:640px){video{max-height:70vh}}
 </style>
-<!-- Login local do painel: não depende de conta ou senha do Supabase. -->
+<!-- Painel com senha validada no servidor; dados sincronizados pelo Supabase. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body class="bg-nude-50 text-nude-800 font-sans antialiased min-h-screen flex flex-col selection:bg-rose-200 selection:text-nude-900">
 <!-- BOTÃO FLUTUANTE WHATSAPP -->
@@ -571,8 +572,8 @@ Selecione uma categoria e depois o procedimento desejado.
           </button>
 </div>
 </div>
-<div class="rounded-2xl bg-amber-50 border border-amber-200 p-3 text-xs text-amber-900">
-<b>Integrações ainda necessárias:</b> pagamentos online, autenticação segura, sincronização entre dispositivos e lembretes automáticos de WhatsApp dependem de servidor e provedores externos. Esta versão mantém os dados somente neste navegador.
+<div class="rounded-2xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800">
+<b>Agenda sincronizada:</b> agendamentos, serviços e bloqueios são salvos online e atualizados entre os dispositivos. O acesso continua sendo somente pela senha da Renata.
       </div>
 <!-- Resumo de Estatísticas -->
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -712,12 +713,83 @@ const defaultServices = [
 let state = loadState();
 let isAdminLoggedIn = false;
 
-window.addEventListener('DOMContentLoaded', () => {
+// Conexão pública do site: somente a chave publishable fica no navegador.
+const RENATA_SUPABASE_URL = 'https://cbqcpslzqqsemynetofg.supabase.co';
+const RENATA_SUPABASE_KEY = 'sb_publishable_WN9OffyUfoKdei3W1c6Umg_W_eS9br1';
+const RENATA_API_URL = RENATA_SUPABASE_URL + '/functions/v1/renata-site-api';
+const ADMIN_TOKEN_KEY = 'renata-stavick-admin-token';
+let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+let realtimeChannel = null;
+let saveQueue = Promise.resolve();
+
+async function renataApi(action, payload = {}) {
+  const response = await fetch(RENATA_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': RENATA_SUPABASE_KEY },
+    body: JSON.stringify({ action, ...payload, token: adminToken })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || 'Não foi possível conectar à agenda online.');
+  return result;
+}
+
+async function refreshRemoteState(asAdmin = false) {
+  const result = await renataApi(asAdmin ? 'get-admin' : 'get-public');
+  if (!result.state) return false;
+  if (asAdmin) {
+    state = {
+      services: Array.isArray(result.state.services) ? result.state.services : defaultServices,
+      appointments: Array.isArray(result.state.appointments) ? result.state.appointments : [],
+      manualBlocks: Array.isArray(result.state.manualBlocks) ? result.state.manualBlocks : []
+    };
+  } else {
+    if (Array.isArray(result.state.services) && result.state.services.length) state.services = result.state.services;
+    state.appointments = Array.isArray(result.state.appointments) ? result.state.appointments : [];
+    state.manualBlocks = Array.isArray(result.state.manualBlocks) ? result.state.manualBlocks : [];
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  return true;
+}
+
+function persistAdminState() {
+  if (!adminToken || !isAdminLoggedIn) return;
+  const snapshot = JSON.parse(JSON.stringify(state));
+  saveQueue = saveQueue.then(() => renataApi('save-admin', { state: snapshot }))
+    .catch(error => { console.error('Falha ao sincronizar agenda:', error); showToast('Não foi possível sincronizar. Verifique a conexão.'); });
+}
+
+function subscribeRenataRealtime() {
+  if (!window.supabase || realtimeChannel) return;
+  try {
+    const client = window.supabase.createClient(RENATA_SUPABASE_URL, RENATA_SUPABASE_KEY);
+    realtimeChannel = client.channel('renata-site-sync', { config: { broadcast: { self: false } } })
+      .on('broadcast', { event: 'state-updated' }, async () => {
+        try {
+          await refreshRemoteState(Boolean(adminToken && isAdminLoggedIn));
+          renderHomeServices();
+          renderBookingServicesSelect();
+          renderTimes();
+          if (isAdminLoggedIn) renderAdmin();
+        } catch (error) { console.warn('Atualização em tempo real indisponível:', error); }
+      }).subscribe();
+  } catch (error) { console.warn('Realtime não pôde ser iniciado:', error); }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  try { await refreshRemoteState(false); } catch (error) { console.warn('Agenda online ainda não carregada:', error); }
   renderHomeServices();
   renderBookingServicesSelect();
   const phoneField=document.getElementById('clientPhoneInput');
   if(phoneField) phoneField.addEventListener('input',()=>{const d=phoneField.value.replace(/\D/g,'').slice(0,11);let v=d;if(d.length>2)v='('+d.slice(0,2)+') '+d.slice(2);if(d.length>7)v='('+d.slice(0,2)+') '+d.slice(2,7)+'-'+d.slice(7);phoneField.value=v;});
   const manualDate=document.getElementById('manualBlockDate'); if(manualDate) manualDate.min=(function(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;})();
+  subscribeRenataRealtime();
+  setInterval(async () => {
+    try {
+      await refreshRemoteState(Boolean(adminToken && isAdminLoggedIn));
+      renderTimes();
+      if (isAdminLoggedIn) renderAdmin();
+    } catch (_) {}
+  }, 20000);
   handleHashNavigation();
 });
 
@@ -750,6 +822,7 @@ function loadState() {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  persistAdminState();
 }
 
 function formatMoney(val) {
@@ -994,7 +1067,7 @@ function minutesToTime(mins) {
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
 
-function submitBooking() {
+async function submitBooking() {
   const serviceId = document.getElementById('bookingServiceSelect').value;
   const date = document.getElementById('bookingDateInput').value;
   const time = document.getElementById('bookingTimeSelect').value;
@@ -1025,34 +1098,39 @@ function submitBooking() {
     return;
   }
 
-  const token = Math.random().toString(36).substring(2, 10) + Date.now().toString(36).slice(-4);
-  const total = Number(service.price)||100;
-  const deposit = Math.round(total*.30*100)/100;
-  const newAppointment = {
-    id: token.slice(0, 8), token, serviceId: service.id, service: service.name,
-    price: total, duration, date, time, endTime: minutesToTime(endM),
-    name, phone, note, status: 'pending', depositStatus: 'pending',
-    depositAmount: deposit, balanceDue: Math.max(0,total-deposit),
-    payments: [], createdAt: new Date().toISOString()
-  };
-
-  state.appointments.push(newAppointment);
-  saveState();
-  document.getElementById('lookupTokenInput').value = token;
-  showView('lookup');
-  lookupBooking();
-  showToast('Solicitação registrada! O horário só será confirmado após aprovação do sinal. 🦋');
-  document.getElementById('clientNameInput').value = '';
-  phoneInput.value = '';
-  document.getElementById('clientNoteInput').value = '';
+  try {
+    const result = await renataApi('book', {
+      serviceId: service.id, date, time, name, phone, note,
+      services: state.services
+    });
+    const newAppointment = result.appointment;
+    state.appointments.push({ id:newAppointment.id, date:newAppointment.date, time:newAppointment.time, duration:newAppointment.duration, status:newAppointment.status });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    document.getElementById('lookupTokenInput').value = newAppointment.token;
+    showView('lookup');
+    await lookupBooking();
+    showToast('Solicitação registrada e sincronizada! A Renata receberá seu pedido. 🦋');
+    document.getElementById('clientNameInput').value = '';
+    phoneInput.value = '';
+    document.getElementById('clientNoteInput').value = '';
+  } catch (error) {
+    showToast(error.message || 'Não foi possível concluir o agendamento. Tente novamente.');
+    try { await refreshRemoteState(false); renderTimes(); } catch (_) {}
+  }
 }
 
-function lookupBooking() {
+async function lookupBooking() {
   const rawInput = document.getElementById('lookupTokenInput').value.trim();
   const token = rawInput.includes('atendimento=') ? rawInput.split('atendimento=')[1].split('&')[0] : rawInput;
   const container = document.getElementById('lookupResultContainer');
 
-  const appt = state.appointments.find(a => a.token === token || a.id === token);
+  let appt = null;
+  try {
+    const remote = await renataApi('lookup', { lookupToken: token });
+    appt = remote.appointment;
+  } catch (_) {
+    appt = state.appointments.find(a => a.token === token || a.id === token) || null;
+  }
 
   if (!appt) {
     container.innerHTML = `
@@ -1118,7 +1196,7 @@ function lookupBooking() {
           <span>Copiar Link Individual</span>
         </button>
 
-        <a href="https://wa.me/5511974988468?text=${encodeURIComponent(`Ol%C3%A1%20Renata!%20Gostaria%20de%20confirmar%20meu%20agendamento%20de%20${appt.service}%20no%20dia%20${dateFormatted}%20%C3%A0s%20${appt.time}.%20Link:%20${shareLink}`)}" target="_blank" class="w-full sm:w-auto text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-xl flex items-center justify-center gap-1.5">
+        <a href="https://wa.me/5511974988468?text=${encodeURIComponent(`Olá, Renata! 🦋 Acabei de realizar meu agendamento pelo site.\n\nProcedimento: ${appt.service}\nData: ${dateFormatted}\nHorário: ${appt.time}\nCódigo: ${appt.token}\n\nAguardo a confirmação. Obrigada! 💗\n${shareLink}`)}" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-4 py-2 rounded-xl flex items-center justify-center gap-1.5">
           <i class="fab fa-whatsapp"></i>
           <span>Enviar Confirmação no WhatsApp</span>
         </a>
@@ -1127,7 +1205,7 @@ function lookupBooking() {
   `;
 }
 
-// Acesso local simplificado. A sessão fica salva neste navegador.
+// A senha é validada no servidor; o HTML não contém a senha administrativa.
 async function loginAdmin() {
   const passwordField = document.getElementById('adminPinInput');
   const errorBox = document.getElementById('adminLoginError');
@@ -1135,23 +1213,33 @@ async function loginAdmin() {
   if (!errorBox || !button || !passwordField) return;
   errorBox.classList.add('hidden');
   errorBox.textContent = '';
-  if (passwordField.value !== 'RenataStavick2rafas') {
-    errorBox.textContent = 'Senha incorreta. Tente novamente.';
-    errorBox.classList.remove('hidden');
-    return;
-  }
   button.disabled = true;
-  button.textContent = 'Abrindo painel...';
+  button.textContent = 'Verificando acesso...';
   try {
-    localStorage.setItem('renata-stavick-admin-local-session', 'true');
+    const auth = await renataApi('login', { pin: passwordField.value });
+    adminToken = auth.token;
+    localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
+    const remote = await renataApi('get-admin');
+    if (remote.state) {
+      state = {
+        services: Array.isArray(remote.state.services) ? remote.state.services : defaultServices,
+        appointments: Array.isArray(remote.state.appointments) ? remote.state.appointments : [],
+        manualBlocks: Array.isArray(remote.state.manualBlocks) ? remote.state.manualBlocks : []
+      };
+    } else {
+      await renataApi('save-admin', { state });
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     isAdminLoggedIn = true;
     document.getElementById('adminLoginCard')?.classList.add('hidden');
     document.getElementById('adminPanelContent')?.classList.remove('hidden');
     passwordField.value = '';
-    renderAdmin();
+    renderHomeServices(); renderBookingServicesSelect(); renderAdmin();
     showToast('Acesso autorizado. Bem-vinda, Renata!');
   } catch (err) {
-    errorBox.textContent = 'Não foi possível salvar o acesso neste navegador.';
+    adminToken = '';
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    errorBox.textContent = err.message || 'Não foi possível validar o acesso.';
     errorBox.classList.remove('hidden');
   } finally {
     button.disabled = false;
@@ -1160,12 +1248,14 @@ async function loginAdmin() {
 }
 
 function logoutAdmin() {
-  localStorage.removeItem('renata-stavick-admin-local-session');
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
+  adminToken = '';
   isAdminLoggedIn = false;
   const passwordField = document.getElementById('adminPinInput');
   if (passwordField) passwordField.value = '';
-  document.getElementById('adminLoginCard')?.classList.remove('hidden');
   document.getElementById('adminPanelContent')?.classList.add('hidden');
+  document.getElementById('adminLoginCard')?.classList.remove('hidden');
+  showToast('Você saiu do painel.');
 }
 
 function renderAdmin() {
@@ -1439,13 +1529,28 @@ function handleHashNavigation() {
 
 window.addEventListener('hashchange', handleHashNavigation);
 
-// Restaura o acesso local neste navegador após a primeira autenticação.
-window.addEventListener('DOMContentLoaded', () => {
-  const authorized = localStorage.getItem('renata-stavick-admin-local-session') === 'true';
-  isAdminLoggedIn = authorized;
-  document.getElementById('adminLoginCard')?.classList.toggle('hidden', authorized);
-  document.getElementById('adminPanelContent')?.classList.toggle('hidden', !authorized);
-  if (authorized) renderAdmin();
+// Restaura a sessão assinada pelo servidor e busca a agenda compartilhada.
+window.addEventListener('DOMContentLoaded', async () => {
+  if (!adminToken) return;
+  try {
+    const remote = await renataApi('get-admin');
+    if (remote.state) {
+      state = {
+        services: Array.isArray(remote.state.services) ? remote.state.services : defaultServices,
+        appointments: Array.isArray(remote.state.appointments) ? remote.state.appointments : [],
+        manualBlocks: Array.isArray(remote.state.manualBlocks) ? remote.state.manualBlocks : []
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+    isAdminLoggedIn = true;
+    document.getElementById('adminLoginCard')?.classList.add('hidden');
+    document.getElementById('adminPanelContent')?.classList.remove('hidden');
+    renderAdmin();
+  } catch (_) {
+    adminToken = '';
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    isAdminLoggedIn = false;
+  }
 });
 </script>
 </body>
